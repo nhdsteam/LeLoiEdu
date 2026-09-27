@@ -26,7 +26,19 @@ import {
   getSavedExamsFromStorage,
   persistSavedExamsToStorage,
   DEFAULT_PRESET_SAVED_EXAMS,
+  getDeletedExamIds,
+  recordDeletedExamId,
+  removeDeletedExamId,
+  clearDeletedExamIds,
+  filterOutDeletedExams,
 } from './utils/examRepository';
+import {
+  filterOutDeletedSubmissions,
+  getDeletedSubmissionIds,
+  recordDeletedSubmissionId,
+  removeDeletedSubmissionId,
+  clearDeletedSubmissionIds,
+} from './utils/submissionStorage';
 import {
   auth,
   loginWithGoogle,
@@ -115,14 +127,14 @@ export default function App() {
       const saved = localStorage.getItem('edu_exam_submissions');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          return filterOutDeletedSubmissions(parsed);
         }
       }
     } catch {
       // Ignore local storage read errors
     }
-    return INITIAL_SUBMISSIONS;
+    return [];
   });
 
   // Sync examInfo to localStorage
@@ -187,39 +199,54 @@ export default function App() {
 
   // Real-time Firebase Sync for Submissions & Exams
   useEffect(() => {
-    let hasCheckedInitialSubs = false;
+    // Pure sync from Firestore: never automatically restore deleted submissions
     const unsubSubs = subscribeToSubmissions((remoteSubs) => {
-      if (!hasCheckedInitialSubs) {
-        hasCheckedInitialSubs = true;
-        const alreadyInitialized = localStorage.getItem('edu_db_submissions_initialized_v2');
-        if ((!remoteSubs || remoteSubs.length === 0) && !alreadyInitialized) {
-          localStorage.setItem('edu_db_submissions_initialized_v2', 'true');
-          INITIAL_SUBMISSIONS.forEach((sub) => {
-            saveSubmissionToFirestore(sub).catch(() => {});
-          });
-          return;
-        }
-      }
-      setSubmissions(remoteSubs || []);
+      const deletedIds = getDeletedSubmissionIds();
+      const validSubs = (remoteSubs || []).filter((s) => !deletedIds.has(s.id));
+      setSubmissions(validSubs);
       setIsFirebaseSynced(true);
+
+      // Clean up Firestore if any tombstoned document is received
+      (remoteSubs || []).forEach((s) => {
+        if (deletedIds.has(s.id)) {
+          deleteSubmissionFromFirestore(s.id).catch(() => {});
+        }
+      });
     });
 
     let hasCheckedInitialExams = false;
     const unsubExams = subscribeToExams((remoteExams) => {
+      const deletedExamIds = getDeletedExamIds();
+      const validExams = (remoteExams || []).filter((e) => !deletedExamIds.has(e.id));
+
+      // Clean up Firestore if any tombstoned exam document is received from remote
+      (remoteExams || []).forEach((e) => {
+        if (deletedExamIds.has(e.id)) {
+          deleteExamFromFirestore(e.id).catch(() => {});
+        }
+      });
+
       if (!hasCheckedInitialExams) {
         hasCheckedInitialExams = true;
-        const alreadyInitialized = localStorage.getItem('edu_db_exams_initialized_v2');
-        if ((!remoteExams || remoteExams.length === 0) && !alreadyInitialized) {
-          localStorage.setItem('edu_db_exams_initialized_v2', 'true');
+        const alreadyInitialized = localStorage.getItem('edu_db_exams_seeded_once');
+        if (validExams.length === 0 && !alreadyInitialized) {
+          localStorage.setItem('edu_db_exams_seeded_once', 'true');
           DEFAULT_PRESET_SAVED_EXAMS.forEach((exam) => {
             saveExamToFirestore(exam).catch(() => {});
           });
           return;
         }
       }
-      if (remoteExams && remoteExams.length > 0) {
-        setSavedExams(remoteExams);
-        const current = remoteExams.find((e) => e.isCurrent);
+      if (validExams.length > 0) {
+        // Sort descending by updatedAt so latest created/updated is first
+        const sorted = [...validExams].sort((a, b) => {
+          const tA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const tB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return tB - tA;
+        });
+        setSavedExams(sorted);
+        // Find current exam - prefer one explicitly marked isCurrent, or sorted[0]
+        const current = sorted.find((e) => e.isCurrent) || sorted[0];
         if (current) {
           setExamInfo(current.examInfo);
           setQuestions(current.questions);
@@ -323,6 +350,7 @@ export default function App() {
       status: 'submitted',
     };
 
+    removeDeletedSubmissionId(newSub.id);
     setSubmissions((prev) => [newSub, ...prev]);
     setCurrentSubmission(newSub);
     setActiveView('student_result');
@@ -370,6 +398,7 @@ export default function App() {
 
   // Submissions handlers (Add, Update, Delete, Reset) with Firebase Sync
   const handleAddSubmission = (newSub: ExamSubmission) => {
+    removeDeletedSubmissionId(newSub.id);
     setSubmissions((prev) => [newSub, ...prev]);
     saveSubmissionToFirestore(newSub).catch((err) =>
       console.warn('Lỗi lưu bài nộp mới lên Firebase:', err)
@@ -377,6 +406,7 @@ export default function App() {
   };
 
   const handleUpdateSubmission = (updated: ExamSubmission) => {
+    removeDeletedSubmissionId(updated.id);
     setSubmissions((prev) =>
       prev.map((s) => (s.id === updated.id ? updated : s))
     );
@@ -388,17 +418,38 @@ export default function App() {
     );
   };
 
-  const handleDeleteSubmission = (submissionId: string) => {
+  const handleDeleteSubmission = async (submissionId: string) => {
+    recordDeletedSubmissionId(submissionId);
     setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
     if (currentSubmission && currentSubmission.id === submissionId) {
       setCurrentSubmission(null);
     }
-    deleteSubmissionFromFirestore(submissionId).catch((err) =>
-      console.warn('Lỗi xóa bài nộp trên Firebase:', err)
+    try {
+      await deleteSubmissionFromFirestore(submissionId);
+    } catch (err) {
+      console.error('Lỗi xóa bài nộp trên Firebase:', err);
+      throw err;
+    }
+  };
+
+  const handleBulkDeleteSubmissions = async (ids: string[]) => {
+    ids.forEach((id) => recordDeletedSubmissionId(id));
+    const idSet = new Set(ids);
+    setSubmissions((prev) => prev.filter((s) => !idSet.has(s.id)));
+    if (currentSubmission && idSet.has(currentSubmission.id)) {
+      setCurrentSubmission(null);
+    }
+    await Promise.all(
+      ids.map((id) =>
+        deleteSubmissionFromFirestore(id).catch((err) => {
+          console.warn(`Lỗi xóa bài nộp ${id} trên Firebase:`, err);
+        })
+      )
     );
   };
 
   const handleResetSubmissions = () => {
+    clearDeletedSubmissionIds();
     setSubmissions(INITIAL_SUBMISSIONS);
     INITIAL_SUBMISSIONS.forEach((sub) => {
       saveSubmissionToFirestore(sub).catch(() => {});
@@ -471,6 +522,7 @@ export default function App() {
       questions,
       note || 'Lưu từ đề hiện hành'
     );
+    removeDeletedExamId(savedExam.id);
     setSavedExams(updatedExams);
     saveExamToFirestore(savedExam).catch((err) =>
       console.warn('Lỗi lưu đề thi lên Firebase:', err)
@@ -478,30 +530,49 @@ export default function App() {
   };
 
   const handleSwitchActiveExam = (selectedExam: SavedExam) => {
+    const now = new Date().toISOString();
     setExamInfo(selectedExam.examInfo);
     setQuestions(selectedExam.questions);
 
     const updated = savedExams.map((e) => ({
       ...e,
       isCurrent: e.id === selectedExam.id,
+      updatedAt: e.id === selectedExam.id ? now : e.updatedAt,
     }));
     setSavedExams(updated);
+    persistSavedExamsToStorage(updated);
     updated.forEach((e) => {
       saveExamToFirestore(e).catch(() => {});
     });
   };
 
-  const handleDeleteSavedExam = (id: string) => {
-    setSavedExams((prev) => prev.filter((e) => e.id !== id));
-    deleteExamFromFirestore(id).catch((err) =>
-      console.warn('Lỗi xóa đề thi trên Firebase:', err)
-    );
+  const handleDeleteSavedExam = async (id: string): Promise<void> => {
+    recordDeletedExamId(id);
+    const remaining = savedExams.filter((e) => e.id !== id);
+    setSavedExams(remaining);
+    persistSavedExamsToStorage(remaining);
+
+    if (examInfo.id === id) {
+      if (remaining.length > 0) {
+        handleSwitchActiveExam(remaining[0]);
+      } else {
+        setExamInfo(DEFAULT_EXAM_INFO);
+        setQuestions(INITIAL_QUESTIONS);
+      }
+    }
+
+    try {
+      await deleteExamFromFirestore(id);
+    } catch (err) {
+      console.warn('Lỗi xóa đề thi trên Firebase:', err);
+    }
   };
 
   const handleDuplicateExam = (id: string) => {
     const target = savedExams.find((e) => e.id === id);
     if (!target) return;
     const newId = `exam_${Date.now()}`;
+    removeDeletedExamId(newId);
     const clone: SavedExam = {
       ...target,
       id: newId,
@@ -553,6 +624,7 @@ export default function App() {
   };
 
   const handleImportExamJson = (importedExam: SavedExam) => {
+    removeDeletedExamId(importedExam.id);
     setSavedExams((prev) => [importedExam, ...prev]);
     saveExamToFirestore(importedExam).catch(() => {});
   };
@@ -563,6 +635,8 @@ export default function App() {
     saveOldExam: boolean = true,
     oldExamNote?: string
   ) => {
+    removeDeletedExamId(newExamInfo.id);
+    const now = new Date().toISOString();
     let currentExamsList = savedExams;
     if (saveOldExam) {
       const { updatedExams, savedExam } = archiveExamToRepo(
@@ -571,8 +645,16 @@ export default function App() {
         questions,
         oldExamNote || `Lưu trữ trước khi tạo đề mới "${newExamInfo.title}"`
       );
-      currentExamsList = updatedExams;
-      saveExamToFirestore(savedExam).catch(() => {});
+      removeDeletedExamId(savedExam.id);
+      const archivedOldExam: SavedExam = {
+        ...savedExam,
+        isCurrent: false,
+        updatedAt: now,
+      };
+      currentExamsList = updatedExams.map((e) =>
+        e.id === archivedOldExam.id ? archivedOldExam : { ...e, isCurrent: false }
+      );
+      saveExamToFirestore(archivedOldExam).catch(console.error);
     }
 
     let nextQuestions = questions;
@@ -585,7 +667,6 @@ export default function App() {
     setExamInfo(newExamInfo);
     setQuestions(nextQuestions);
 
-    const now = new Date().toISOString();
     const newSavedExam: SavedExam = {
       id: newExamInfo.id,
       examInfo: newExamInfo,
@@ -597,12 +678,24 @@ export default function App() {
       tags: ['Đề mới'],
     };
 
+    // Update all other exams in Firestore to isCurrent: false
+    for (const e of currentExamsList) {
+      if (e.id !== newSavedExam.id && e.isCurrent) {
+        saveExamToFirestore({ ...e, isCurrent: false, updatedAt: now }).catch(() => {});
+      }
+    }
+
     const finalExams = [
       newSavedExam,
-      ...currentExamsList.map((e) => ({ ...e, isCurrent: false })),
+      ...currentExamsList
+        .filter((e) => e.id !== newSavedExam.id)
+        .map((e) => ({ ...e, isCurrent: false })),
     ];
     setSavedExams(finalExams);
-    saveExamToFirestore(newSavedExam).catch(() => {});
+    persistSavedExamsToStorage(finalExams);
+    saveExamToFirestore(newSavedExam).catch((err) => {
+      console.error('Lỗi khi lưu đề thi mới lên Firebase:', err);
+    });
   };
 
   const handleApplyExamWithArchive = (
@@ -611,6 +704,8 @@ export default function App() {
     saveOldExam: boolean = true,
     oldExamNote?: string
   ) => {
+    removeDeletedExamId(newExamInfo.id);
+    const now = new Date().toISOString();
     let currentExamsList = savedExams;
     if (saveOldExam) {
       const { updatedExams, savedExam } = archiveExamToRepo(
@@ -619,14 +714,21 @@ export default function App() {
         questions,
         oldExamNote || 'Tự động lưu trước khi nạp đề thi từ tệp file'
       );
-      currentExamsList = updatedExams;
-      saveExamToFirestore(savedExam).catch(() => {});
+      removeDeletedExamId(savedExam.id);
+      const archivedOldExam: SavedExam = {
+        ...savedExam,
+        isCurrent: false,
+        updatedAt: now,
+      };
+      currentExamsList = updatedExams.map((e) =>
+        e.id === archivedOldExam.id ? archivedOldExam : { ...e, isCurrent: false }
+      );
+      saveExamToFirestore(archivedOldExam).catch(console.error);
     }
 
     setExamInfo(newExamInfo);
     setQuestions(newQuestions);
 
-    const now = new Date().toISOString();
     const newSavedExam: SavedExam = {
       id: newExamInfo.id,
       examInfo: newExamInfo,
@@ -638,12 +740,23 @@ export default function App() {
       tags: ['Word/PDF'],
     };
 
+    for (const e of currentExamsList) {
+      if (e.id !== newSavedExam.id && e.isCurrent) {
+        saveExamToFirestore({ ...e, isCurrent: false, updatedAt: now }).catch(() => {});
+      }
+    }
+
     const finalExams = [
       newSavedExam,
-      ...currentExamsList.map((e) => ({ ...e, isCurrent: false })),
+      ...currentExamsList
+        .filter((e) => e.id !== newSavedExam.id)
+        .map((e) => ({ ...e, isCurrent: false })),
     ];
     setSavedExams(finalExams);
-    saveExamToFirestore(newSavedExam).catch(() => {});
+    persistSavedExamsToStorage(finalExams);
+    saveExamToFirestore(newSavedExam).catch((err) => {
+      console.error('Lỗi khi lưu đề thi từ file lên Firebase:', err);
+    });
   };
 
   return (
@@ -766,6 +879,7 @@ export default function App() {
             onAddSubmission={handleAddSubmission}
             onUpdateSubmission={handleUpdateSubmission}
             onDeleteSubmission={handleDeleteSubmission}
+            onBulkDeleteSubmissions={handleBulkDeleteSubmissions}
             onResetSubmissions={handleResetSubmissions}
             onViewStudentDetail={(sub) => {
               setCurrentSubmission(sub);

@@ -8,7 +8,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
     }
 
     function isSignedIn() {
@@ -27,8 +27,8 @@ service cloud.firestore {
       return data.id is string && data.id.size() > 0 && data.id.size() <= 128
         && data.examInfo is map
         && data.questions is list
-        && (!('note' in data) || (data.note is string && data.note.size() <= 1000))
-        && (!('authorEmail' in data) || (data.authorEmail is string && data.authorEmail.size() <= 128));
+        && (!('note' in data) || data.note == null || (data.note is string && data.note.size() <= 2000))
+        && (!('authorEmail' in data) || data.authorEmail == null || (data.authorEmail is string && data.authorEmail.size() <= 128));
     }
 
     function isValidSubmission(data) {

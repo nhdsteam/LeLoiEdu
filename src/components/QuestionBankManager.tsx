@@ -49,7 +49,7 @@ interface QuestionBankManagerProps {
   savedExams: SavedExam[];
   onSwitchActiveExam: (selectedExam: SavedExam) => void;
   onSaveCurrentExamToRepo: (note?: string) => void;
-  onDeleteSavedExam: (id: string) => void;
+  onDeleteSavedExam: (id: string) => Promise<void> | void;
   onDuplicateExam: (id: string) => void;
   onUpdateSavedExamMeta: (id: string, updatedInfo: Partial<ExamInfo>, note?: string) => void;
   onImportExamJson: (importedExam: SavedExam) => void;

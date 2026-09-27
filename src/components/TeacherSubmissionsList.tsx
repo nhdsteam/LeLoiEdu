@@ -36,7 +36,8 @@ interface TeacherSubmissionsListProps {
   examInfo?: ExamInfo;
   onAddSubmission: (newSub: ExamSubmission) => void;
   onUpdateSubmission: (updated: ExamSubmission) => void;
-  onDeleteSubmission: (submissionId: string) => void;
+  onDeleteSubmission: (submissionId: string) => Promise<void> | void;
+  onBulkDeleteSubmissions?: (ids: string[]) => Promise<void> | void;
   onResetSubmissions?: () => void;
   onViewStudentDetail: (sub: ExamSubmission) => void;
 }
@@ -130,6 +131,7 @@ export const TeacherSubmissionsList: React.FC<TeacherSubmissionsListProps> = ({
   onAddSubmission,
   onUpdateSubmission,
   onDeleteSubmission,
+  onBulkDeleteSubmissions,
   onResetSubmissions,
   onViewStudentDetail,
 }) => {
@@ -455,22 +457,37 @@ export const TeacherSubmissionsList: React.FC<TeacherSubmissionsListProps> = ({
   };
 
   // Confirm Single Delete
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!submissionToDelete) return;
-    onDeleteSubmission(submissionToDelete.id);
-    setSelectedIds((prev) => prev.filter((id) => id !== submissionToDelete.id));
-    showFeedback(`Đã xóa bài nộp của thí sinh ${submissionToDelete.studentName} (${submissionToDelete.studentId}).`, 'info');
+    const target = submissionToDelete;
+    const targetId = target.id;
     setSubmissionToDelete(null);
+    setSelectedIds((prev) => prev.filter((id) => id !== targetId));
+    try {
+      await onDeleteSubmission(targetId);
+      showFeedback(`Đã xóa vĩnh viễn bài nộp của thí sinh ${target.studentName} (${target.studentId}).`, 'info');
+    } catch (err: any) {
+      showFeedback(`Lỗi khi xóa bài nộp trên Firebase: ${err?.message || 'Lỗi thao tác'}`, 'error');
+    }
   };
 
   // Confirm Bulk Delete
-  const handleConfirmBulkDelete = () => {
-    selectedIds.forEach((id) => {
-      onDeleteSubmission(id);
-    });
-    showFeedback(`Đã xóa thành công ${selectedIds.length} bài nộp đã chọn.`, 'info');
+  const handleConfirmBulkDelete = async () => {
+    const idsToDelete = [...selectedIds];
     setSelectedIds([]);
     setIsBulkDeleteModalOpen(false);
+    try {
+      if (onBulkDeleteSubmissions) {
+        await onBulkDeleteSubmissions(idsToDelete);
+      } else {
+        for (const id of idsToDelete) {
+          await onDeleteSubmission(id);
+        }
+      }
+      showFeedback(`Đã xóa vĩnh viễn ${idsToDelete.length} bài nộp đã chọn khỏi hệ thống.`, 'info');
+    } catch (err: any) {
+      showFeedback(`Lỗi khi xóa bài nộp trên Firebase: ${err?.message || 'Lỗi thao tác'}`, 'error');
+    }
   };
 
   // Confirm Reset Submissions

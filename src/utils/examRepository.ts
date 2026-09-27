@@ -2,6 +2,75 @@ import { ExamInfo, Question, SavedExam } from '../types';
 import { DEFAULT_EXAM_INFO, INITIAL_QUESTIONS } from '../data/examData';
 
 export const EXAM_REPO_STORAGE_KEY = 'edu_saved_exams_repository';
+export const DELETED_EXAMS_KEY = 'edu_deleted_exam_ids';
+
+/**
+ * Retrieves the set of exam IDs that have been explicitly deleted by the user.
+ * This acts as a persistent tombstone/blacklist to prevent old snapshots or browser caches
+ * from resurrecting deleted exams.
+ */
+export function getDeletedExamIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_EXAMS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set(parsed);
+      }
+    }
+  } catch (err) {
+    console.warn('Lỗi đọc danh sách đề thi đã xóa từ storage:', err);
+  }
+  return new Set();
+}
+
+/**
+ * Marks an exam ID as permanently deleted.
+ */
+export function recordDeletedExamId(id: string): void {
+  try {
+    const set = getDeletedExamIds();
+    set.add(id);
+    localStorage.setItem(DELETED_EXAMS_KEY, JSON.stringify(Array.from(set)));
+  } catch (err) {
+    console.warn('Lỗi lưu danh sách đề thi đã xóa vào storage:', err);
+  }
+}
+
+/**
+ * Removes an exam ID from the deleted set (e.g. when re-created or re-imported).
+ */
+export function removeDeletedExamId(id: string): void {
+  try {
+    const set = getDeletedExamIds();
+    if (set.has(id)) {
+      set.delete(id);
+      localStorage.setItem(DELETED_EXAMS_KEY, JSON.stringify(Array.from(set)));
+    }
+  } catch (err) {
+    console.warn('Lỗi xóa ID đề thi khỏi danh sách đã xóa:', err);
+  }
+}
+
+/**
+ * Clears all deleted tombstone exam IDs (used when explicitly resetting to initial preset sample data).
+ */
+export function clearDeletedExamIds(): void {
+  try {
+    localStorage.removeItem(DELETED_EXAMS_KEY);
+  } catch (err) {
+    console.warn('Lỗi xóa sạch danh sách đề thi đã xóa:', err);
+  }
+}
+
+/**
+ * Filters out any exams that have been explicitly marked as deleted.
+ */
+export function filterOutDeletedExams(exams: SavedExam[]): SavedExam[] {
+  const deleted = getDeletedExamIds();
+  if (deleted.size === 0) return exams;
+  return exams.filter((e) => !deleted.has(e.id));
+}
 
 // Pre-packaged archive exams for realistic experience
 export const DEFAULT_PRESET_SAVED_EXAMS: SavedExam[] = [
@@ -73,18 +142,19 @@ export function getSavedExamsFromStorage(): SavedExam[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return filterOutDeletedExams(parsed);
       }
     }
   } catch (err) {
     console.warn('Lỗi đọc kho đề thi từ localStorage:', err);
   }
-  return DEFAULT_PRESET_SAVED_EXAMS;
+  return filterOutDeletedExams(DEFAULT_PRESET_SAVED_EXAMS);
 }
 
 export function persistSavedExamsToStorage(exams: SavedExam[]): void {
   try {
-    localStorage.setItem(EXAM_REPO_STORAGE_KEY, JSON.stringify(exams));
+    const sanitized = filterOutDeletedExams(exams);
+    localStorage.setItem(EXAM_REPO_STORAGE_KEY, JSON.stringify(sanitized));
   } catch (err) {
     console.error('Lỗi lưu kho đề thi vào localStorage:', err);
   }
@@ -112,6 +182,7 @@ export function archiveExamToRepo(
       examInfo: { ...examInfo },
       questions: [...questions],
       updatedAt: now,
+      isCurrent: false,
       note: note || exams[existingIdx].note || 'Đã cập nhật từ đề hiện hành',
     };
     const updated = [...exams];

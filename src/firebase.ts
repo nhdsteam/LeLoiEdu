@@ -117,14 +117,20 @@ export async function logoutUser(): Promise<void> {
 
 export const EXAMS_COLLECTION = 'exams';
 
+// Helper to strip undefined properties for Firestore
+function cleanForFirestore<T>(data: T): any {
+  return JSON.parse(JSON.stringify(data));
+}
+
 export async function saveExamToFirestore(exam: SavedExam): Promise<void> {
   const path = `${EXAMS_COLLECTION}/${exam.id}`;
   try {
     const docRef = doc(db, EXAMS_COLLECTION, exam.id);
+    const cleaned = cleanForFirestore(exam);
     await setDoc(
       docRef,
       {
-        ...exam,
+        ...cleaned,
         syncedAt: new Date().toISOString(),
       },
       { merge: true }
@@ -191,10 +197,11 @@ export async function saveSubmissionToFirestore(submission: ExamSubmission): Pro
   const path = `${SUBMISSIONS_COLLECTION}/${submission.id}`;
   try {
     const docRef = doc(db, SUBMISSIONS_COLLECTION, submission.id);
+    const cleaned = cleanForFirestore(submission);
     await setDoc(
       docRef,
       {
-        ...submission,
+        ...cleaned,
         syncedAt: new Date().toISOString(),
       },
       { merge: true }
@@ -260,10 +267,11 @@ export async function saveTeacherAccountToFirestore(account: TeacherAccount): Pr
   const path = `${TEACHER_ACCOUNTS_COLLECTION}/${account.id}`;
   try {
     const docRef = doc(db, TEACHER_ACCOUNTS_COLLECTION, account.id);
+    const cleaned = cleanForFirestore(account);
     await setDoc(
       docRef,
       {
-        ...account,
+        ...cleaned,
         updatedAt: new Date().toISOString(),
       },
       { merge: true }

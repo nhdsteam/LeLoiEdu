@@ -36,7 +36,7 @@ interface ExamRepositoryManagerProps {
   currentQuestions: Question[];
   onSwitchActiveExam: (selectedExam: SavedExam) => void;
   onSaveCurrentExamToRepo: (note?: string) => void;
-  onDeleteSavedExam: (id: string) => void;
+  onDeleteSavedExam: (id: string) => Promise<void> | void;
   onDuplicateExam: (id: string) => void;
   onUpdateSavedExamMeta: (id: string, updatedInfo: Partial<ExamInfo>, note?: string) => void;
   onImportExamJson: (importedExam: SavedExam) => void;
@@ -70,6 +70,10 @@ export const ExamRepositoryManager: React.FC<ExamRepositoryManagerProps> = ({
   const [editNote, setEditNote] = useState('');
   const [editDuration, setEditDuration] = useState(45);
   const [editSchool, setEditSchool] = useState('');
+
+  // Delete Exam Confirmation Modal
+  const [examToDelete, setExamToDelete] = useState<SavedExam | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
   // Quick Save Active Exam Modal/Prompt
   const [showSaveActivePrompt, setShowSaveActivePrompt] = useState(false);
@@ -475,24 +479,19 @@ export const ExamRepositoryManager: React.FC<ExamRepositoryManagerProps> = ({
                   {/* Delete Exam */}
                   <button
                     type="button"
-                    disabled={isActive || savedExams.length <= 1}
-                    onClick={() => {
-                      if (confirm(`Bạn có chắc chắn muốn xóa đề thi "${exam.examInfo.title}" khỏi kho lưu trữ?`)) {
-                        onDeleteSavedExam(exam.id);
-                        showToast('Đã xóa đề thi khỏi kho!');
-                      }
-                    }}
+                    disabled={savedExams.length <= 1}
+                    onClick={() => setExamToDelete(exam)}
                     className={`p-1.5 rounded-lg transition-colors ${
-                      isActive || savedExams.length <= 1
+                      savedExams.length <= 1
                         ? 'opacity-30 cursor-not-allowed text-slate-400'
                         : 'hover:bg-rose-50 text-rose-600 cursor-pointer'
                     }`}
                     title={
-                      isActive
-                        ? 'Không thể xóa đề đang được kích hoạt làm bài'
-                        : savedExams.length <= 1
+                      savedExams.length <= 1
                         ? 'Cần giữ lại ít nhất 1 đề thi trong kho'
-                        : 'Xóa đề thi khỏi kho'
+                        : isActive
+                        ? 'Xóa đề thi hiện hành (hệ thống sẽ tự động kích hoạt đề khác trong kho)'
+                        : 'Xóa đề thi khỏi kho lưu trữ'
                     }
                   >
                     <Trash2 className="w-4 h-4" />
@@ -636,6 +635,21 @@ export const ExamRepositoryManager: React.FC<ExamRepositoryManagerProps> = ({
               </button>
 
               <div className="flex items-center gap-2">
+                {savedExams.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const toDel = previewExam;
+                      setPreviewExam(null);
+                      setExamToDelete(toDel);
+                    }}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-semibold cursor-pointer flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xóa đề này</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setPreviewExam(null)}
@@ -800,6 +814,113 @@ export const ExamRepositoryManager: React.FC<ExamRepositoryManagerProps> = ({
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer"
               >
                 Xác nhận lưu vào kho
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirm Delete Exam */}
+      {examToDelete && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-rose-950 via-rose-900 to-slate-900 px-6 py-4.5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-rose-500/20 border border-rose-400/30 flex items-center justify-center">
+                  <Trash2 className="w-4 h-4 text-rose-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Xóa đề thi khỏi kho</h3>
+                  <p className="text-[11px] text-rose-200">Hành động này sẽ xóa đề vĩnh viễn khỏi Cloud và máy</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setExamToDelete(null)}
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4 text-xs sm:text-sm">
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <div className="font-bold text-slate-900 text-sm">
+                  {examToDelete.examInfo.title}
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+                  <span className="bg-white px-2 py-0.5 rounded-md border border-slate-200 font-medium">
+                    {examToDelete.questions.length} câu hỏi
+                  </span>
+                  <span className="bg-white px-2 py-0.5 rounded-md border border-slate-200 font-medium">
+                    {examToDelete.examInfo.grade} • {examToDelete.examInfo.durationMinutes} phút
+                  </span>
+                  <span className="bg-white px-2 py-0.5 rounded-md border border-slate-200 font-medium">
+                    {examToDelete.examInfo.school}
+                  </span>
+                </div>
+              </div>
+
+              {examToDelete.id === currentExamInfo.id && (
+                <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-2.5 text-amber-900">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-1">
+                    <span className="font-bold block">Đề thi này hiện đang được kích hoạt làm bài!</span>
+                    <p className="text-amber-800 leading-relaxed">
+                      Khi xóa, hệ thống sẽ tự động kích hoạt đề thi còn lại trong kho để học sinh tiếp tục làm bài.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-500">
+                Bạn có chắc chắn muốn xóa đề thi này không? Toàn bộ nội dung câu hỏi đi kèm sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu Firebase.
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setExamToDelete(null)}
+                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  if (!examToDelete) return;
+                  setIsDeleting(true);
+                  try {
+                    await onDeleteSavedExam(examToDelete.id);
+                    showToast(`Đã xóa đề thi "${examToDelete.examInfo.title}" thành công!`);
+                    setExamToDelete(null);
+                  } catch (err) {
+                    console.error('Lỗi khi xóa đề thi:', err);
+                    showToast('Có lỗi xảy ra khi xóa đề thi. Vui lòng thử lại!');
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Đang xóa...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xác nhận xóa</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
