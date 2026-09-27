@@ -187,19 +187,36 @@ export default function App() {
 
   // Real-time Firebase Sync for Submissions & Exams
   useEffect(() => {
+    let hasCheckedInitialSubs = false;
     const unsubSubs = subscribeToSubmissions((remoteSubs) => {
-      if (remoteSubs && remoteSubs.length > 0) {
-        setSubmissions(remoteSubs);
-        setIsFirebaseSynced(true);
-      } else {
-        // Seed initial submissions to Firebase Firestore if empty
-        INITIAL_SUBMISSIONS.forEach((sub) => {
-          saveSubmissionToFirestore(sub).catch(() => {});
-        });
+      if (!hasCheckedInitialSubs) {
+        hasCheckedInitialSubs = true;
+        const alreadyInitialized = localStorage.getItem('edu_db_submissions_initialized_v2');
+        if ((!remoteSubs || remoteSubs.length === 0) && !alreadyInitialized) {
+          localStorage.setItem('edu_db_submissions_initialized_v2', 'true');
+          INITIAL_SUBMISSIONS.forEach((sub) => {
+            saveSubmissionToFirestore(sub).catch(() => {});
+          });
+          return;
+        }
       }
+      setSubmissions(remoteSubs || []);
+      setIsFirebaseSynced(true);
     });
 
+    let hasCheckedInitialExams = false;
     const unsubExams = subscribeToExams((remoteExams) => {
+      if (!hasCheckedInitialExams) {
+        hasCheckedInitialExams = true;
+        const alreadyInitialized = localStorage.getItem('edu_db_exams_initialized_v2');
+        if ((!remoteExams || remoteExams.length === 0) && !alreadyInitialized) {
+          localStorage.setItem('edu_db_exams_initialized_v2', 'true');
+          DEFAULT_PRESET_SAVED_EXAMS.forEach((exam) => {
+            saveExamToFirestore(exam).catch(() => {});
+          });
+          return;
+        }
+      }
       if (remoteExams && remoteExams.length > 0) {
         setSavedExams(remoteExams);
         const current = remoteExams.find((e) => e.isCurrent);
@@ -207,13 +224,10 @@ export default function App() {
           setExamInfo(current.examInfo);
           setQuestions(current.questions);
         }
-        setIsFirebaseSynced(true);
       } else {
-        // Seed initial exams to Firebase Firestore if empty
-        DEFAULT_PRESET_SAVED_EXAMS.forEach((exam) => {
-          saveExamToFirestore(exam).catch(() => {});
-        });
+        setSavedExams([]);
       }
+      setIsFirebaseSynced(true);
     });
 
     // Seed initial admin and teacher accounts to Firebase Firestore if empty
@@ -395,33 +409,58 @@ export default function App() {
     }
   };
 
+  // Helper to sync question updates to the active exam in Firestore
+  const syncQuestionsToActiveExamFirestore = (newQuestions: Question[], newExamInfo?: ExamInfo) => {
+    const targetInfo = newExamInfo || examInfo;
+    const currentSaved = savedExams.find((e) => e.isCurrent || e.id === targetInfo.id);
+    if (currentSaved) {
+      const updatedExam: SavedExam = {
+        ...currentSaved,
+        examInfo: targetInfo,
+        questions: newQuestions,
+        updatedAt: new Date().toISOString(),
+      };
+      setSavedExams((prev) =>
+        prev.map((e) => (e.id === updatedExam.id ? updatedExam : e))
+      );
+      saveExamToFirestore(updatedExam).catch(() => {});
+    }
+  };
+
   // Exam & Question bank handlers
   const handleUpdateExamInfo = (newExamInfo: ExamInfo) => {
     setExamInfo(newExamInfo);
+    syncQuestionsToActiveExamFirestore(questions, newExamInfo);
   };
 
   const handleImportExam = (newExamInfo: ExamInfo, newQuestions: Question[]) => {
     setExamInfo(newExamInfo);
     setQuestions(newQuestions);
+    syncQuestionsToActiveExamFirestore(newQuestions, newExamInfo);
   };
 
   const handleAddQuestion = (newQ: Question) => {
-    setQuestions((prev) => [...prev, newQ]);
+    const newQuestions = [...questions, newQ];
+    setQuestions(newQuestions);
+    syncQuestionsToActiveExamFirestore(newQuestions);
   };
 
   const handleUpdateQuestion = (updatedQ: Question) => {
-    setQuestions((prev) =>
-      prev.map((q) => (q.id === updatedQ.id ? updatedQ : q))
-    );
+    const newQuestions = questions.map((q) => (q.id === updatedQ.id ? updatedQ : q));
+    setQuestions(newQuestions);
+    syncQuestionsToActiveExamFirestore(newQuestions);
   };
 
   const handleDeleteQuestion = (questionId: string) => {
-    setQuestions((prev) => prev.filter((q) => q.id !== questionId));
+    const newQuestions = questions.filter((q) => q.id !== questionId);
+    setQuestions(newQuestions);
+    syncQuestionsToActiveExamFirestore(newQuestions);
   };
 
   const handleResetQuestions = () => {
     setExamInfo(DEFAULT_EXAM_INFO);
     setQuestions(INITIAL_QUESTIONS);
+    syncQuestionsToActiveExamFirestore(INITIAL_QUESTIONS, DEFAULT_EXAM_INFO);
   };
 
   // Exam Repository Handlers with Firebase Sync

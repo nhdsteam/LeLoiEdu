@@ -382,7 +382,7 @@ export const TeacherSubmissionsList: React.FC<TeacherSubmissionsListProps> = ({
 
       const newSub: ExamSubmission = {
         id: `sub-manual-${Date.now()}`,
-        examId: 'tin-hoc-9-gk1-2026',
+        examId: examInfo.id || 'tin-hoc-9-gk1-2026',
         studentId: formStudentId.trim(),
         studentName: formStudentName.trim(),
         studentClass: formStudentClass.trim(),

@@ -68,7 +68,7 @@ service cloud.firestore {
       allow get, list: if true;
       allow create: if isValidId(examId) && isValidExam(request.resource.data);
       allow update: if isValidId(examId) && isValidExam(request.resource.data);
-      allow delete: if isValidId(examId) && (isAdmin() || isSignedIn());
+      allow delete: if isValidId(examId);
     }
 
     // Submissions collection (Bài thi & Kết quả thi của học sinh)
@@ -76,7 +76,7 @@ service cloud.firestore {
       allow get, list: if true;
       allow create: if isValidId(submissionId) && isValidSubmission(request.resource.data);
       allow update: if isValidId(submissionId) && isValidSubmission(request.resource.data);
-      allow delete: if isValidId(submissionId) && (isAdmin() || isSignedIn());
+      allow delete: if isValidId(submissionId);
     }
 
     // Test connection doc
