@@ -1,0 +1,140 @@
+{
+  "entities": {
+    "exam": {
+      "title": "Exam",
+      "description": "Đề thi và cấu trúc câu hỏi lưu trữ trên Firebase",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "examInfo": {
+          "type": "object",
+          "description": "Thông tin tiêu đề, môn, lớp, trường học"
+        },
+        "questions": {
+          "type": "array",
+          "description": "Danh sách các câu hỏi Phần I, II, III"
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "isCurrent": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "tags": {
+          "type": "array"
+        },
+        "authorEmail": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "examInfo", "questions"]
+    },
+    "submission": {
+      "title": "ExamSubmission",
+      "description": "Bài thi, câu trả lời, kết quả thi và điểm chấm tự luận của học sinh",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "examId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "studentId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "studentName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "studentClass": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "startedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "submittedAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "durationSeconds": {
+          "type": "number"
+        },
+        "scorePart1": {
+          "type": "number"
+        },
+        "scorePart2": {
+          "type": "number"
+        },
+        "scorePart3": {
+          "type": "number"
+        },
+        "totalScore": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["submitted", "graded", "pending_essay"]
+        },
+        "violationCount": {
+          "type": "number"
+        },
+        "antiCheatLogs": {
+          "type": "array"
+        },
+        "answers": {
+          "type": "object"
+        }
+      },
+      "required": ["id", "examId", "studentId", "studentName", "studentClass", "totalScore", "status"]
+    },
+    "adminUser": {
+      "title": "AdminUser",
+      "description": "Người dùng quản trị viên hệ thống khảo thí",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "teacher"]
+        }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/exams/{examId}": {
+      "schema": "exam",
+      "description": "Kho lưu trữ đề thi và thông tin ma trận, câu hỏi trắc nghiệm và tự luận"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "submission",
+      "description": "Kết quả bài làm, điểm thi và nhận xét tự luận của từng học sinh"
+    },
+    "/admins/{adminId}": {
+      "schema": "adminUser",
+      "description": "Danh sách tài khoản giáo viên quản trị hệ thống"
+    }
+  }
+}

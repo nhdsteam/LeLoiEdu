@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@media print {
+  /* Hide all app navigation, banners, buttons, tabs when printing */
+  header, nav, .no-print, #btn-print-result, #btn-retake-exam, #btn-view-class-stats-from-result {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm 15mm;
+  }
+}

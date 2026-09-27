@@ -1,0 +1,6 @@
+{
+  "name": "Hệ Thống Thi Trực Tuyến & Chấm Điểm LeLoiEdu",
+  "description": "Hệ thống thi trực tuyến thông minh, chấm điểm tự động theo ma trận đề chuẩn Bộ GD&ĐT, giám sát chống gian lận, quản lý ngân hàng câu hỏi và thống kê kết quả học tập chi tiết.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

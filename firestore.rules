@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Deny all by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && request.auth.token.email == 'nhd.steam@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isValidExam(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.examInfo is map
+        && data.questions is list
+        && (!('note' in data) || (data.note is string && data.note.size() <= 1000))
+        && (!('authorEmail' in data) || (data.authorEmail is string && data.authorEmail.size() <= 128));
+    }
+
+    function isValidSubmission(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.examId is string && data.examId.size() > 0 && data.examId.size() <= 128
+        && data.studentId is string && data.studentId.size() > 0 && data.studentId.size() <= 64
+        && data.studentName is string && data.studentName.size() > 0 && data.studentName.size() <= 128
+        && data.studentClass is string && data.studentClass.size() > 0 && data.studentClass.size() <= 32
+        && data.totalScore is number && data.totalScore >= 0 && data.totalScore <= 10
+        && (data.status in ['submitted', 'graded', 'pending_essay']);
+    }
+
+    // Admins collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isBootstrappedAdmin();
+    }
+
+    // Exams collection (Đề thi & Ngân hàng câu hỏi)
+    match /exams/{examId} {
+      allow get, list: if true;
+      allow create: if isValidId(examId) && isValidExam(request.resource.data);
+      allow update: if isValidId(examId) && isValidExam(request.resource.data);
+      allow delete: if isValidId(examId) && (isAdmin() || isSignedIn());
+    }
+
+    // Submissions collection (Bài thi & Kết quả thi của học sinh)
+    match /submissions/{submissionId} {
+      allow get, list: if true;
+      allow create: if isValidId(submissionId) && isValidSubmission(request.resource.data);
+      allow update: if isValidId(submissionId) && isValidSubmission(request.resource.data);
+      allow delete: if isValidId(submissionId) && (isAdmin() || isSignedIn());
+    }
+
+    // Test connection doc
+    match /test/{docId} {
+      allow read: if true;
+    }
+  }
+}
