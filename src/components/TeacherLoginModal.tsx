@@ -21,7 +21,17 @@ import {
   Check,
   ArrowRight,
   ShieldAlert,
+  Cloud,
+  Database,
+  RefreshCw,
 } from 'lucide-react';
+import { TeacherAccount } from '../types';
+import {
+  saveTeacherAccountToFirestore,
+  deleteTeacherAccountFromFirestore,
+  subscribeToTeacherAccounts,
+  seedInitialTeacherAccountsIfEmpty,
+} from '../firebase';
 
 export interface TeacherProfile {
   username: string;
@@ -30,15 +40,7 @@ export interface TeacherProfile {
   school: string;
 }
 
-export interface TeacherAccount {
-  id: string;
-  username: string;
-  password: string;
-  name: string;
-  roleTitle: string;
-  school: string;
-  createdAt?: string;
-}
+export type { TeacherAccount };
 
 export const DEFAULT_TEACHER_ACCOUNTS: TeacherAccount[] = [
   {
@@ -122,11 +124,49 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
     isAdmin && initialTab === 'manage' ? 'manage' : 'login'
   );
   const [accounts, setAccounts] = useState<TeacherAccount[]>(getStoredTeacherAccounts);
+  const [isFirebaseSynced, setIsFirebaseSynced] = useState<boolean>(true);
+  const [isSavingAccount, setIsSavingAccount] = useState<boolean>(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState<boolean>(false);
+
+  // Real-time synchronization with Firebase Firestore
+  useEffect(() => {
+    // Seed initial default accounts if empty on Firebase
+    seedInitialTeacherAccountsIfEmpty(DEFAULT_TEACHER_ACCOUNTS)
+      .then((seeded) => {
+        if (seeded && seeded.length > 0) {
+          setAccounts(seeded);
+          saveTeacherAccounts(seeded);
+          setIsFirebaseSynced(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('Initial seed teacher accounts error:', err);
+      });
+
+    // Realtime listener for teacher accounts collection
+    const unsubscribe = subscribeToTeacherAccounts(
+      (remoteAccounts) => {
+        if (remoteAccounts && remoteAccounts.length > 0) {
+          setAccounts(remoteAccounts);
+          saveTeacherAccounts(remoteAccounts);
+          setIsFirebaseSynced(true);
+        }
+      },
+      (error) => {
+        console.warn('Firebase teacher accounts subscription error:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   // Sync accounts from storage when opening
   useEffect(() => {
     if (isOpen) {
-      setAccounts(getStoredTeacherAccounts());
+      const stored = getStoredTeacherAccounts();
+      if (stored.length > 0) {
+        setAccounts(stored);
+      }
       setActiveTab(isAdmin && initialTab === 'manage' ? 'manage' : 'login');
       setErrorMessage('');
       setSuccessFeedback('');
@@ -259,8 +299,8 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
     setIsFormOpen(true);
   };
 
-  // Save Account (Create or Update)
-  const handleSaveAccount = (e: React.FormEvent) => {
+  // Save Account (Create or Update) - Lưu trực tiếp vào Firebase Firestore
+  const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
 
@@ -297,47 +337,62 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
       return;
     }
 
-    let updatedAccounts: TeacherAccount[];
-    if (formMode === 'create') {
-      const newAcc: TeacherAccount = {
-        id: 'gv-' + Date.now(),
-        username: cleanUser,
-        password: cleanPass,
-        name: cleanName,
-        roleTitle: cleanRole || 'Giáo viên bộ môn Tin học',
-        school: cleanSchool || 'Trường THCS',
-        createdAt: new Date().toLocaleDateString('vi-VN'),
-      };
-      updatedAccounts = [newAcc, ...accounts];
-      setSuccessFeedback(`Đã thêm thành công tài khoản giáo viên: ${cleanName}`);
-    } else {
-      updatedAccounts = accounts.map((acc) => {
-        if (acc.id === editingAccountId) {
-          return {
-            ...acc,
-            username: cleanUser,
-            password: cleanPass,
-            name: cleanName,
-            roleTitle: cleanRole || 'Giáo viên bộ môn Tin học',
-            school: cleanSchool || 'Trường THCS',
-          };
-        }
-        return acc;
-      });
-      setSuccessFeedback(`Đã cập nhật thông tin tài khoản: ${cleanName}`);
+    setIsSavingAccount(true);
+    try {
+      let updatedAccounts: TeacherAccount[];
+      if (formMode === 'create') {
+        const newAcc: TeacherAccount = {
+          id: 'gv-' + Date.now(),
+          username: cleanUser,
+          password: cleanPass,
+          name: cleanName,
+          roleTitle: cleanRole || 'Giáo viên bộ môn Tin học',
+          school: cleanSchool || 'Trường THCS Thực Nghiệm',
+          createdAt: new Date().toLocaleDateString('vi-VN'),
+          role: cleanUser === 'admin' ? 'admin' : 'teacher',
+        };
+        await saveTeacherAccountToFirestore(newAcc);
+        updatedAccounts = [newAcc, ...accounts];
+        setSuccessFeedback(`Đã thêm & lưu vào Firebase tài khoản: ${cleanName}`);
+      } else {
+        const currentAcc = accounts.find((a) => a.id === editingAccountId);
+        const updatedAcc: TeacherAccount = {
+          ...(currentAcc || {
+            id: editingAccountId || 'gv-' + Date.now(),
+            createdAt: new Date().toLocaleDateString('vi-VN'),
+          }),
+          id: editingAccountId || 'gv-' + Date.now(),
+          username: cleanUser,
+          password: cleanPass,
+          name: cleanName,
+          roleTitle: cleanRole || 'Giáo viên bộ môn Tin học',
+          school: cleanSchool || 'Trường THCS Thực Nghiệm',
+          role: cleanUser === 'admin' ? 'admin' : 'teacher',
+        };
+        await saveTeacherAccountToFirestore(updatedAcc);
+        updatedAccounts = accounts.map((acc) =>
+          acc.id === editingAccountId ? updatedAcc : acc
+        );
+        setSuccessFeedback(`Đã cập nhật trên Firebase tài khoản: ${cleanName}`);
+      }
+
+      setAccounts(updatedAccounts);
+      saveTeacherAccounts(updatedAccounts);
+      setIsFormOpen(false);
+
+      setTimeout(() => {
+        setSuccessFeedback('');
+      }, 4000);
+    } catch (err: any) {
+      console.error('Error saving teacher account to Firebase:', err);
+      setFormError('Lỗi khi lưu tài khoản lên Firebase: ' + (err.message || 'Vui lòng thử lại.'));
+    } finally {
+      setIsSavingAccount(false);
     }
-
-    setAccounts(updatedAccounts);
-    saveTeacherAccounts(updatedAccounts);
-    setIsFormOpen(false);
-
-    setTimeout(() => {
-      setSuccessFeedback('');
-    }, 4000);
   };
 
-  // Delete Account
-  const handleConfirmDelete = () => {
+  // Delete Account - Xóa trực tiếp khỏi Firebase Firestore
+  const handleConfirmDelete = async () => {
     if (!accountToDelete) return;
 
     if (accounts.length <= 1) {
@@ -346,28 +401,44 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
       return;
     }
 
-    const updated = accounts.filter((a) => a.id !== accountToDelete.id);
-    setAccounts(updated);
-    saveTeacherAccounts(updated);
-    setSuccessFeedback(`Đã xóa tài khoản "${accountToDelete.username}" thành công.`);
-    setAccountToDelete(null);
+    setIsDeletingAccount(true);
+    try {
+      await deleteTeacherAccountFromFirestore(accountToDelete.id);
+      const updated = accounts.filter((a) => a.id !== accountToDelete.id);
+      setAccounts(updated);
+      saveTeacherAccounts(updated);
+      setSuccessFeedback(`Đã xóa tài khoản "${accountToDelete.username}" khỏi Firebase thành công.`);
+      setAccountToDelete(null);
 
-    setTimeout(() => {
-      setSuccessFeedback('');
-    }, 3500);
+      setTimeout(() => {
+        setSuccessFeedback('');
+      }, 3500);
+    } catch (err: any) {
+      console.error('Error deleting teacher account from Firebase:', err);
+      setFormError('Lỗi khi xóa tài khoản khỏi Firebase: ' + (err.message || 'Thất bại'));
+    } finally {
+      setIsDeletingAccount(false);
+    }
   };
 
-  // Reset to default accounts
-  const handleResetDefaults = () => {
+  // Reset to default accounts - Khôi phục và đồng bộ lên Firebase Firestore
+  const handleResetDefaults = async () => {
     if (
       window.confirm(
-        'Bạn có chắc chắn muốn khôi phục danh sách tài khoản giảng viên về cấu hình mẫu mặc định không?'
+        'Bạn có chắc chắn muốn khôi phục danh sách tài khoản giảng viên về cấu hình mặc định và đồng bộ lên Firebase không?'
       )
     ) {
-      setAccounts(DEFAULT_TEACHER_ACCOUNTS);
-      saveTeacherAccounts(DEFAULT_TEACHER_ACCOUNTS);
-      setSuccessFeedback('Đã khôi phục danh sách 3 tài khoản giáo viên mặc định.');
-      setTimeout(() => setSuccessFeedback(''), 3000);
+      try {
+        for (const acc of DEFAULT_TEACHER_ACCOUNTS) {
+          await saveTeacherAccountToFirestore(acc);
+        }
+        setAccounts(DEFAULT_TEACHER_ACCOUNTS);
+        saveTeacherAccounts(DEFAULT_TEACHER_ACCOUNTS);
+        setSuccessFeedback('Đã khôi phục và lưu lên Firebase 3 tài khoản mặc định.');
+        setTimeout(() => setSuccessFeedback(''), 3000);
+      } catch (err: any) {
+        setFormError('Lỗi khi khôi phục tài khoản lên Firebase: ' + (err.message || ''));
+      }
     }
   };
 
@@ -599,6 +670,32 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
           {/* TAB 2: MANAGE ACCOUNTS (ADD / EDIT / DELETE) */}
           {activeTab === 'manage' && (
             <div className="space-y-4">
+              {/* Firebase Cloud Sync Banner */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3.5 bg-gradient-to-r from-indigo-50 via-blue-50 to-emerald-50/70 border border-indigo-200/80 rounded-2xl text-xs shadow-2xs">
+                <div className="flex items-center gap-2.5 text-indigo-950 font-semibold">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                    <Cloud className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-900 font-bold">Lưu trữ & Đồng bộ Firebase Firestore</span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Trực tuyến
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-normal mt-0.5">
+                      Tất cả tài khoản quản trị và giảng viên được lưu trực tiếp vào collection <code className="text-indigo-700 font-mono font-semibold bg-indigo-100/60 px-1 py-0.2 rounded">/teacher_accounts</code>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 self-start sm:self-auto text-[11px] text-indigo-800 font-medium bg-white/80 border border-indigo-200/60 px-2.5 py-1 rounded-xl shadow-2xs">
+                  <Database className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Realtime Sync: Bật</span>
+                </div>
+              </div>
+
               {/* Header actions of manage tab */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
                 <div>
@@ -788,10 +885,20 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
                       <button
                         type="submit"
                         id="btn-save-teacher-account"
-                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                        disabled={isSavingAccount}
+                        className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>{formMode === 'create' ? 'Lưu tài khoản' : 'Cập nhật tài khoản'}</span>
+                        {isSavingAccount ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Đang lưu lên Firebase...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{formMode === 'create' ? 'Lưu vào Firebase' : 'Cập nhật Firebase'}</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </form>
@@ -844,11 +951,19 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
                                 @{acc.username}
                               </span>
-                              {acc.username.toLowerCase() === 'admin' && (
+                              {acc.username.toLowerCase() === 'admin' ? (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-300">
-                                  Quản Trị Viên
+                                  Quản Trị Viên (Admin)
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                                  Giảng Viên
                                 </span>
                               )}
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                <Cloud className="w-3 h-3 text-blue-500" />
+                                <span>Firebase DB</span>
+                              </span>
                             </div>
 
                             <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -962,9 +1077,17 @@ export const TeacherLoginModal: React.FC<TeacherLoginModalProps> = ({
                 <button
                   type="button"
                   onClick={handleConfirmDelete}
-                  className="flex-1 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-xs cursor-pointer"
+                  disabled={isDeletingAccount}
+                  className="flex-1 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  Xóa tài khoản
+                  {isDeletingAccount ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Đang xóa...</span>
+                    </>
+                  ) : (
+                    <span>Xóa khỏi Firebase</span>
+                  )}
                 </button>
               </div>
             </div>

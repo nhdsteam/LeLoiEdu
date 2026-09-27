@@ -121,6 +121,50 @@
         }
       },
       "required": ["email", "role"]
+    },
+    "teacherAccount": {
+      "title": "TeacherAccount",
+      "description": "Danh sách tài khoản giảng viên và ban giám khảo quản trị hệ thống khảo thí lưu trên Firebase Firestore",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "username": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "password": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "roleTitle": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "school": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "teacher"]
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "username", "password", "name", "roleTitle", "school"]
     }
   },
   "firestore": {
@@ -135,6 +179,10 @@
     "/admins/{adminId}": {
       "schema": "adminUser",
       "description": "Danh sách tài khoản giáo viên quản trị hệ thống"
+    },
+    "/teacher_accounts/{accountId}": {
+      "schema": "teacherAccount",
+      "description": "Danh sách tài khoản quản trị và giảng viên lưu trữ trên Firebase"
     }
   }
 }

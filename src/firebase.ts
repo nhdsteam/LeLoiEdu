@@ -15,7 +15,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { ExamInfo, ExamSubmission, Question, SavedExam } from './types';
+import { ExamInfo, ExamSubmission, Question, SavedExam, TeacherAccount } from './types';
 
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
@@ -250,4 +250,92 @@ export function subscribeToSubmissions(
       }
     }
   );
+}
+
+// ==================== TEACHER & ADMIN ACCOUNTS IN FIRESTORE ====================
+
+export const TEACHER_ACCOUNTS_COLLECTION = 'teacher_accounts';
+
+export async function saveTeacherAccountToFirestore(account: TeacherAccount): Promise<void> {
+  const path = `${TEACHER_ACCOUNTS_COLLECTION}/${account.id}`;
+  try {
+    const docRef = doc(db, TEACHER_ACCOUNTS_COLLECTION, account.id);
+    await setDoc(
+      docRef,
+      {
+        ...account,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteTeacherAccountFromFirestore(accountId: string): Promise<void> {
+  const path = `${TEACHER_ACCOUNTS_COLLECTION}/${accountId}`;
+  try {
+    await deleteDoc(doc(db, TEACHER_ACCOUNTS_COLLECTION, accountId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function fetchTeacherAccountsFromFirestore(): Promise<TeacherAccount[]> {
+  const path = TEACHER_ACCOUNTS_COLLECTION;
+  try {
+    const snapshot = await getDocs(collection(db, TEACHER_ACCOUNTS_COLLECTION));
+    const list: TeacherAccount[] = [];
+    snapshot.forEach((d) => {
+      list.push(d.data() as TeacherAccount);
+    });
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+export function subscribeToTeacherAccounts(
+  onData: (accounts: TeacherAccount[]) => void,
+  onError?: (err: Error) => void
+): () => void {
+  const path = TEACHER_ACCOUNTS_COLLECTION;
+  return onSnapshot(
+    collection(db, TEACHER_ACCOUNTS_COLLECTION),
+    (snapshot) => {
+      const accounts: TeacherAccount[] = [];
+      snapshot.forEach((d) => {
+        accounts.push(d.data() as TeacherAccount);
+      });
+      onData(accounts);
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (e: any) {
+        if (onError) onError(e);
+      }
+    }
+  );
+}
+
+export async function seedInitialTeacherAccountsIfEmpty(
+  defaultAccounts: TeacherAccount[]
+): Promise<TeacherAccount[]> {
+  try {
+    const existing = await fetchTeacherAccountsFromFirestore();
+    if (existing && existing.length > 0) {
+      return existing;
+    }
+    // Seed initial default accounts if empty
+    for (const acc of defaultAccounts) {
+      await saveTeacherAccountToFirestore(acc);
+    }
+    return defaultAccounts;
+  } catch (error) {
+    console.warn('Could not seed initial teacher accounts to Firestore:', error);
+    return defaultAccounts;
+  }
 }

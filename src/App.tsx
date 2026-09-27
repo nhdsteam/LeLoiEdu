@@ -36,7 +36,9 @@ import {
   saveSubmissionToFirestore,
   deleteSubmissionFromFirestore,
   subscribeToSubmissions,
+  seedInitialTeacherAccountsIfEmpty,
 } from './firebase';
+import { DEFAULT_TEACHER_ACCOUNTS } from './components/TeacherLoginModal';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { ShieldAlert, LogIn, Cloud } from 'lucide-react';
 
@@ -212,6 +214,11 @@ export default function App() {
           saveExamToFirestore(exam).catch(() => {});
         });
       }
+    });
+
+    // Seed initial admin and teacher accounts to Firebase Firestore if empty
+    seedInitialTeacherAccountsIfEmpty(DEFAULT_TEACHER_ACCOUNTS).catch((err) => {
+      console.warn('Initial teacher accounts seed warning:', err);
     });
 
     return () => {

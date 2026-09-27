@@ -130,3 +130,16 @@ export interface SavedExam {
   note?: string;
   tags?: string[];
 }
+
+export interface TeacherAccount {
+  id: string;
+  username: string;
+  password: string;
+  name: string;
+  roleTitle: string;
+  school: string;
+  createdAt?: string;
+  updatedAt?: string;
+  role?: 'admin' | 'teacher';
+}
+

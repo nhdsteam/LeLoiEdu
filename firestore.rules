@@ -41,10 +41,26 @@ service cloud.firestore {
         && (data.status in ['submitted', 'graded', 'pending_essay']);
     }
 
+    function isValidTeacherAccount(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.username is string && data.username.size() > 0 && data.username.size() <= 64
+        && data.password is string && data.password.size() > 0 && data.password.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 128
+        && data.roleTitle is string && data.roleTitle.size() > 0 && data.roleTitle.size() <= 128
+        && data.school is string && data.school.size() > 0 && data.school.size() <= 128;
+    }
+
     // Admins collection
     match /admins/{adminId} {
       allow read: if isSignedIn();
       allow write: if isBootstrappedAdmin();
+    }
+
+    // Teacher & Admin Accounts collection (Lưu trữ tài khoản giảng viên & quản trị viên)
+    match /teacher_accounts/{accountId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(accountId) && isValidTeacherAccount(request.resource.data);
+      allow delete: if isValidId(accountId);
     }
 
     // Exams collection (Đề thi & Ngân hàng câu hỏi)
