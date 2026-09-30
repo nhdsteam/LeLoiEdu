@@ -62,7 +62,7 @@ export function generatePrintableReportHtml(
     .map((r) => {
       let answerDetail = '';
       if (r.type === 'multiple_choice') {
-        answerDetail = `Chọn: ${r.details.userChoice || '-'} | Đ.án: ${r.details.correctChoice || '-'}`;
+        answerDetail = r.details.userChoice ? `Đã chọn: ${r.details.userChoice}` : 'Chưa chọn (bỏ trống)';
       } else if (r.type === 'true_false') {
         const correctCount = r.details.correctStatementsCount || 0;
         answerDetail = `Đúng ${correctCount}/4 ý`;
